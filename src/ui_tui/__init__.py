@@ -6,7 +6,7 @@ Python standard library (zero external dependencies).
 
 Architecture:
   - engine.py      — Terminal I/O with double-buffered rendering
-  - theme.py       — Semantic color palette and style system
+  - theme/         — Semantic color palette and style system (package)
   - events.py      — Typed event bus, key bindings, focus management
   - core.py        — Component base class and layout engine
   - components.py  — Production component library (20+ components)

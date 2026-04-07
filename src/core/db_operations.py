@@ -26,7 +26,7 @@ import shutil
 import sqlite3
 import time
 import urllib.parse
-from typing import Optional
+from typing import Callable, Optional
 
 from .constants import PB_KEY, JSON_KEY, BACKUP_PREFIX, DB_FILENAME
 from .models import (
@@ -476,7 +476,7 @@ def run_recovery_pipeline(
     convs_dir: str,
     brain_dir: str,
     ws_assignments: dict[str, dict[str, str]] | None = None,
-    on_progress: Optional[callable] = None,
+    on_progress: Optional[Callable[[str, str], None]] = None,
 ) -> RecoveryResult:
     """
     Executes the full 6-phase recovery pipeline.

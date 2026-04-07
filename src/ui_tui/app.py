@@ -8,7 +8,7 @@ manager, toast system, and all views.
 UX Best Practices enforced:
   - Adaptive frame rate: 30 FPS during animations, blocking input when idle
   - Toast notifications rendered as a global overlay on every frame
-  - Screen transitions provide spatial continuity via push/pop patterns
+  - Animated screen transitions (slide push/pop) for spatial continuity
   - Clean shutdown guaranteed even on exceptions or signals
   - Terminal title updated to show current context
 """
@@ -20,7 +20,8 @@ import time
 from ..core.lifecycle import ApplicationContext
 from ..core.constants import APP_NAME, VERSION
 from .engine import TerminalEngine, Key, KeyEvent
-from .animation import AnimationManager
+from .animation import AnimationManager, ScreenTransition
+from .capabilities import CAPS
 from .components import ToastManager
 from .views import (
     HomeView, ConversationBrowserView, ConversationDataView,
@@ -47,6 +48,7 @@ class App:
         self.screen_stack: list[object] = []
         self.animations = AnimationManager()
         self.toasts = ToastManager()
+        self._transition: ScreenTransition | None = None
 
     def run(self) -> None:
         """Main event loop with animation-aware rendering."""
@@ -61,10 +63,19 @@ class App:
             self._push(home)
 
             while self.screen_stack:
-                # --- Render ---
                 cols, rows = self.engine.get_size()
-                current = self.screen_stack[-1]
-                frame = current.view(cols, rows)
+
+                # --- Render ---
+                if self._transition and not self._transition.is_complete:
+                    # Render transition animation frame
+                    frame = self._transition.render(cols, rows)
+                else:
+                    # Clear completed transition
+                    if self._transition:
+                        self._transition = None
+
+                    current = self.screen_stack[-1]
+                    frame = current.view(cols, rows)
 
                 # Overlay toasts on every frame
                 if self.toasts.has_active:
@@ -81,13 +92,22 @@ class App:
                 self.animations.tick()
 
                 # --- Input ---
-                is_animating = self.animations.is_animating or self.toasts.has_active
+                is_animating = (
+                    self.animations.is_animating
+                    or self.toasts.has_active
+                    or (self._transition is not None and not self._transition.is_complete)
+                )
 
                 if is_animating:
                     # Non-blocking: poll for input with short timeout
                     key = self.engine.poll_key(timeout_ms=33)  # ~30 FPS
                     if key is None:
                         # No input — just redraw on next loop iteration
+                        continue
+                    # If user presses key during transition, snap to end
+                    if self._transition and not self._transition.is_complete:
+                        self._transition = None
+                        self.engine.invalidate()
                         continue
                 else:
                     # Blocking: wait for input (zero CPU when idle)
@@ -99,6 +119,7 @@ class App:
                         continue
 
                 # --- Update ---
+                current = self.screen_stack[-1]
                 action = current.update(key)
 
                 if action is None:
@@ -122,19 +143,49 @@ class App:
             self.engine.exit_fullscreen()
 
     def _push(self, screen: object) -> None:
-        """Push a new screen onto the stack."""
+        """Push a new screen onto the stack with optional slide-in transition."""
+        # Capture old frame for transition
+        old_frame: list[str] = []
+        if self.screen_stack and not CAPS.reduce_motion:
+            cols, rows = self.engine.get_size()
+            old_screen = self.screen_stack[-1]
+            old_frame = old_screen.view(cols, rows)
+
         self.screen_stack.append(screen)
         if hasattr(screen, "on_enter"):
             screen.on_enter()
-        self.engine.invalidate()  # Force full repaint for new screen
+
+        # Start slide-in transition (unless reduce motion)
+        if old_frame and not CAPS.reduce_motion:
+            cols, rows = self.engine.get_size()
+            new_frame = screen.view(cols, rows)
+            self._transition = ScreenTransition(
+                old_frame, new_frame, direction="push", duration=0.15,
+            )
+        else:
+            self.engine.invalidate()  # Force full repaint for new screen
 
     def _pop(self) -> None:
-        """Pop the top screen off the stack."""
+        """Pop the top screen off the stack with optional slide-out transition."""
+        old_frame: list[str] = []
+        if self.screen_stack and not CAPS.reduce_motion:
+            cols, rows = self.engine.get_size()
+            old_frame = self.screen_stack[-1].view(cols, rows)
+
         if self.screen_stack:
             self.screen_stack.pop()
         if self.screen_stack and hasattr(self.screen_stack[-1], "on_enter"):
             self.screen_stack[-1].on_enter()
-        self.engine.invalidate()  # Force full repaint on return
+
+        # Start slide-out transition
+        if old_frame and self.screen_stack and not CAPS.reduce_motion:
+            cols, rows = self.engine.get_size()
+            new_frame = self.screen_stack[-1].view(cols, rows)
+            self._transition = ScreenTransition(
+                old_frame, new_frame, direction="pop", duration=0.15,
+            )
+        else:
+            self.engine.invalidate()  # Force full repaint on return
 
     def _create_screen(self, action_string: str) -> object | None:
         """Create a screen instance from a routing action string."""

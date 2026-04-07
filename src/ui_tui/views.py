@@ -17,8 +17,8 @@ import os, time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .engine import Key, KeyEvent
-from .theme import Style, STYLES, PALETTE, Icons, BORDER_ROUNDED, _Ansi
+from .engine import Key, KeyEvent, clipboard_write
+from .theme import Style, STYLES, PALETTE, Icons, BORDER_ROUNDED, _Ansi, Glyphs
 from .core import (
     visible_len, truncate, pad, pad_center, styled_line, horizontal_rule, Component,
 )
@@ -27,6 +27,7 @@ from .components import (
     TextInput, TextViewer, Modal, ConfirmDialog, ActionMenu,
     ProgressBar, Spinner, ToastManager, Tabs, Breadcrumb,
     SearchBar, Badge, SplitPane, ScrollView, WizardPipeline,
+    Gauge, BarChart, KeyValueGrid, Separator, NotificationBanner,
     overlay_on,
 )
 from ..core.constants import VERSION, APP_NAME
@@ -52,7 +53,7 @@ def _render_header(cols: int, subtitle: str = "") -> list[str]:
     brand identity and navigation context.
     """
     header = Header(app_name=APP_NAME, version=VERSION, subtitle=subtitle)
-    return header.render(cols, 2)
+    return header.render(cols, 3)
 
 
 def _render_footer(cols: int, hints: list[tuple[str, str]], status: str = "",
@@ -263,7 +264,7 @@ class HomeView:
 
     def view(self, cols: int, rows: int) -> list[str]:
         lines = _render_header(cols, "Database Manager")
-        main_h = rows - 3
+        main_h = rows - 4
 
         if not self.m.snapshots:
             # Empty state with guidance
@@ -510,6 +511,13 @@ class ConversationBrowserView:
             self.m.menu_selected = 0
         elif key.key == Key.ESCAPE:
             return "back"
+        elif key.char.lower() == "c" and cur_conv:
+            if clipboard_write(cur_conv.uuid):
+                self.m.status_msg = f"{Icons.CHECK} UUID copied to clipboard"
+                self.m.status_severity = "success"
+            else:
+                self.m.status_msg = f"{Icons.CROSS} Copy failed"
+                self.m.status_severity = "error"
 
         # Keep scroll in sync
         visible_h = max(1, 20)
@@ -522,7 +530,7 @@ class ConversationBrowserView:
 
     def view(self, cols: int, rows: int) -> list[str]:
         lines = _render_header(cols, f"Browsing {os.path.basename(self.target_db)}")
-        main_h = rows - 3
+        main_h = rows - 4
 
         left = self._render_conv_table(int(cols * 0.55), main_h)
         cur_conv = self.m.filtered[self.m.selected] if self.m.filtered else None

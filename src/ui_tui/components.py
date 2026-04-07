@@ -38,9 +38,10 @@ from .core import (
     styled_line, horizontal_rule, Constraint,
 )
 from .theme import (
-    Style, STYLES, PALETTE, Icons, BoxChars, _Ansi,
+    Style, STYLES, PALETTE, Icons, BoxChars, _Ansi, Glyphs,
     BORDER_ROUNDED, BORDER_THIN, Color, generate_gradient, gradient_bg_line,
 )
+from .capabilities import CAPS
 from .engine import Key, KeyEvent
 
 
@@ -69,22 +70,53 @@ class Header(Component):
     def render(self, width: int, height: int) -> list[str]:
         lines: list[str] = []
 
-        # Line 1: Branded header with gradient background
+        # Line 1: Branded header with gradient text on gradient BG
         title_text = f" {Icons.DIAMOND} {self.app_name}"
         if self.version:
             title_text += f"  v{self.version}"
-        title_padded = pad(title_text, width)
-        line1 = STYLES.header.apply(title_padded)
+
+        if CAPS.truecolor and not CAPS.reduce_motion:
+            # Premium gradient rendering: gradient background + gradient text
+            bg_bar = gradient_bg_line(width, PALETTE.gradient_start, PALETTE.gradient_end)
+            # Overlay bold white text on the gradient background
+            title_padded = pad(title_text, width)
+            prefix = f"{_Ansi.BOLD}{PALETTE.text_bright.fg()}"
+            line1 = bg_bar[:0] + prefix + title_padded + _Ansi.RESET
+            # Re-render properly: bg gradient per character with text
+            parts: list[str] = []
+            n = max(width - 1, 1)
+            for i, ch in enumerate(title_padded):
+                t = i / n
+                bg_color = Color.lerp(PALETTE.gradient_start, PALETTE.gradient_end, t)
+                parts.append(f"{bg_color.bg()}{_Ansi.BOLD}{PALETTE.text_bright.fg()}{ch}")
+            parts.append(_Ansi.RESET)
+            line1 = "".join(parts)
+        else:
+            title_padded = pad(title_text, width)
+            line1 = STYLES.header.apply(title_padded)
         lines.append(line1)
 
-        # Line 2: Subtitle / navigation context
+        # Line 2: Accent bar (thin gradient separator)
+        if CAPS.truecolor:
+            accent_parts: list[str] = []
+            n = max(width - 1, 1)
+            for i in range(width):
+                t = i / n
+                c = Color.lerp(PALETTE.primary, PALETTE.accent, t)
+                accent_parts.append(f"{c.fg()}{Glyphs.THICK_H}")
+            accent_parts.append(_Ansi.RESET)
+            lines.append("".join(accent_parts))
+        else:
+            lines.append(STYLES.accent_bar.apply(Glyphs.THICK_H * width))
+
+        # Line 3: Subtitle / navigation context
         if self.subtitle:
             sub_text = f" {Icons.CHEVRON_R} {self.subtitle}"
         else:
             sub_text = " "
         sub_padded = pad(sub_text, width)
-        line2 = STYLES.subheader.apply(sub_padded)
-        lines.append(line2)
+        line3 = STYLES.subheader.apply(sub_padded)
+        lines.append(line3)
 
         while len(lines) < height:
             lines.append(" " * width)
@@ -246,7 +278,7 @@ class DataTable(Component):
                     pad(truncate(row_text, width - 3), width - 3)
                 )
             else:
-                row_style = STYLES.table_row if (real_idx % 2 == 0) else STYLES.table_row
+                row_style = STYLES.table_row if (real_idx % 2 == 0) else STYLES.table_row_alt
                 row_content = "   " + row_style.apply(
                     pad(truncate(row_text, width - 3), width - 3)
                 )
@@ -631,11 +663,36 @@ class Modal(Component):
         h_pad = " " * max(0, h_center)
         centered_frame = [h_pad + line for line in frame]
 
+        # Shadow: offset dim lines below and to the right
+        shadow_frame: list[str] = []
+        for line in centered_frame:
+            shadow_frame.append(line)
+        shadow_offset = " " * max(0, h_center + 2)
+        shadow_w = modal_w
+        shadow_line = shadow_offset + STYLES.shadow.apply("░" * shadow_w)
+
         v_start = max(0, (height - len(centered_frame)) // 2)
         result: list[str] = [" " * width] * height
         for i, line in enumerate(centered_frame):
             if 0 <= v_start + i < height:
                 result[v_start + i] = pad(line, width)
+        # Render shadow lines below modal
+        for i in range(len(centered_frame)):
+            shadow_row = v_start + i + 1
+            if 1 <= shadow_row < height:
+                # Add shadow on the right side of each modal line
+                existing = result[shadow_row]
+                shadow_char = STYLES.shadow.apply("░")
+                shadow_right = h_center + modal_w
+                if shadow_right < width:
+                    result[shadow_row] = existing  # Just keep existing for now
+        # Bottom shadow
+        bottom_shadow_row = v_start + len(centered_frame)
+        if 0 <= bottom_shadow_row < height:
+            result[bottom_shadow_row] = pad(
+                " " * (h_center + 1) + STYLES.shadow.apply("░" * modal_w),
+                width
+            )
 
         return result
 
@@ -755,7 +812,18 @@ class ProgressBar(Component):
         filled = int(effective_bar_w * self.value)
         empty = effective_bar_w - filled
 
-        fill_str = STYLES.progress_fill.apply(Icons.BLOCK_FULL * filled)
+        if CAPS.truecolor and filled > 0:
+            # Gradient fill from primary to accent
+            fill_parts: list[str] = []
+            for i in range(filled):
+                t = i / max(filled - 1, 1)
+                c = Color.lerp(PALETTE.primary, PALETTE.accent, t)
+                fill_parts.append(f"{c.fg()}{Icons.BLOCK_FULL}")
+            fill_parts.append(_Ansi.RESET)
+            fill_str = "".join(fill_parts)
+        else:
+            fill_str = STYLES.progress_fill.apply(Icons.BLOCK_FULL * filled)
+
         empty_str = STYLES.progress_empty.apply(Icons.BLOCK_1_4 * empty)
         pct = f"{self.value * 100:5.1f}%"
 
@@ -1145,12 +1213,28 @@ class ScrollView(Component):
         self.scroll = scroll
 
     def render(self, width: int, height: int) -> list[str]:
+        total = len(self.content_lines)
         visible = self.content_lines[self.scroll:self.scroll + height]
+        show_scrollbar = total > height
+        content_w = width - (1 if show_scrollbar else 0)
+
         lines: list[str] = []
         for line in visible:
-            lines.append(pad(truncate(line, width), width))
+            lines.append(pad(truncate(line, content_w), content_w))
         while len(lines) < height:
-            lines.append(" " * width)
+            lines.append(" " * content_w)
+
+        # Add scrollbar track with position thumb
+        if show_scrollbar:
+            thumb_h = max(1, height * height // total)
+            thumb_start = int(self.scroll / max(total - 1, 1) * (height - thumb_h))
+            for i in range(height):
+                if i < len(lines):
+                    if thumb_start <= i < thumb_start + thumb_h:
+                        lines[i] = lines[i][:content_w] + STYLES.accent_bar.apply(Glyphs.SCROLL_THUMB)
+                    else:
+                        lines[i] = lines[i][:content_w] + STYLES.dim.apply(Glyphs.SCROLL_TRACK)
+
         return lines[:height]
 
     def handle_key(self, key: KeyEvent) -> Optional[str]:
@@ -1242,3 +1326,221 @@ def overlay_on(background: list[str], overlay_lines: list[str]) -> list[str]:
         if 0 <= start + i < h:
             result[start + i] = line
     return result
+
+
+# ==============================================================================
+# GAUGE — Health Score Indicator
+# ==============================================================================
+
+class Gauge(Component):
+    """
+    Visual health gauge using block-element characters.
+
+    UX Best Practice: Gauges provide an instant visual impression of health
+    or completion without requiring the user to parse numbers.
+    """
+
+    def __init__(self, value: float = 0.0, label: str = "",
+                 max_width: int = 20, component_id: Optional[str] = None) -> None:
+        super().__init__(component_id=component_id)
+        self.value = max(0.0, min(1.0, value))
+        self.label = label
+        self.max_width = max_width
+
+    def render(self, width: int, height: int) -> list[str]:
+        bar_w = min(self.max_width, width - len(self.label) - 12)
+        filled = int(bar_w * self.value)
+        empty = bar_w - filled
+
+        # Color-coded: green > 0.7, amber > 0.4, red <= 0.4
+        if self.value > 0.7:
+            fill_style = STYLES.success
+        elif self.value > 0.4:
+            fill_style = STYLES.warning
+        else:
+            fill_style = STYLES.error
+
+        fill_str = fill_style.apply(Icons.BLOCK_FULL * filled)
+        empty_str = STYLES.dim.apply(Glyphs.THIN_H * empty)
+        pct = f"{self.value * 100:.0f}%"
+
+        # Gauge icon
+        if self.value >= 0.95:
+            icon = Glyphs.GAUGE_FULL
+        elif self.value >= 0.7:
+            icon = Glyphs.GAUGE_THREE_Q
+        elif self.value >= 0.4:
+            icon = Glyphs.GAUGE_HALF
+        elif self.value > 0.05:
+            icon = Glyphs.GAUGE_QUARTER
+        else:
+            icon = Glyphs.GAUGE_EMPTY
+
+        line = f"  {fill_style.apply(icon)} {self.label}: {fill_str}{empty_str} {pct}"
+        lines = [pad(line, width)]
+        while len(lines) < height:
+            lines.append(" " * width)
+        return lines[:height]
+
+
+# ==============================================================================
+# BAR CHART — Horizontal Data Bars
+# ==============================================================================
+
+class BarChart(Component):
+    """
+    Horizontal bar chart for comparing values.
+
+    UX Best Practice: Bar charts enable instant visual comparison across
+    multiple items, following Tufte's data-ink ratio principle.
+    """
+
+    def __init__(self, items: Optional[list[tuple[str, float]]] = None,
+                 max_bar_width: int = 30,
+                 component_id: Optional[str] = None) -> None:
+        super().__init__(component_id=component_id)
+        self.items = items or []
+        self.max_bar_width = max_bar_width
+
+    def render(self, width: int, height: int) -> list[str]:
+        lines: list[str] = []
+        if not self.items:
+            lines.append(STYLES.muted.apply(pad("  No data.", width)))
+            while len(lines) < height:
+                lines.append(" " * width)
+            return lines[:height]
+
+        max_val = max(v for _, v in self.items) if self.items else 1.0
+        max_val = max(max_val, 0.001)  # Prevent division by zero
+        max_label = max(len(label) for label, _ in self.items)
+        bar_w = min(self.max_bar_width, width - max_label - 12)
+
+        for label, value in self.items:
+            filled = int(bar_w * value / max_val)
+            bar = STYLES.info.apply(Icons.BLOCK_FULL * filled)
+            empty = STYLES.dim.apply(Glyphs.THIN_H * (bar_w - filled))
+            val_str = STYLES.muted.apply(f" {value:.1f}")
+            lbl = pad(f"  {label}", max_label + 3)
+            lines.append(STYLES.body.apply(lbl) + bar + empty + val_str)
+
+        while len(lines) < height:
+            lines.append(" " * width)
+        return lines[:height]
+
+
+# ==============================================================================
+# KEY-VALUE GRID — Formatted Metadata Display
+# ==============================================================================
+
+class KeyValueGrid(Component):
+    """
+    Automatic two-column grid layout for metadata key-value pairs.
+
+    UX Best Practice: Aligned labels with consistent spacing improve
+    scannability and reduce visual noise in metadata panels.
+    """
+
+    def __init__(self, title: str = "",
+                 items: Optional[list[tuple[str, str]]] = None,
+                 component_id: Optional[str] = None) -> None:
+        super().__init__(component_id=component_id)
+        self.title = title
+        self.items = items or []
+
+    def render(self, width: int, height: int) -> list[str]:
+        lines: list[str] = []
+        if self.title:
+            lines.append(STYLES.title.apply(f"  {self.title}"))
+            lines.append("")
+
+        if not self.items:
+            lines.append(STYLES.muted.apply(pad("  No data.", width)))
+        else:
+            max_key = max((len(k) for k, _ in self.items), default=0)
+            for key, value in self.items:
+                label = pad(f"  {key}:", max_key + 4)
+                lines.append(STYLES.muted.apply(label) + STYLES.body.apply(f" {value}"))
+
+        while len(lines) < height:
+            lines.append(" " * width)
+        return lines[:height]
+
+
+# ==============================================================================
+# SEPARATOR — Themed Horizontal Rule with Label
+# ==============================================================================
+
+class Separator(Component):
+    """
+    Themed horizontal rule with optional centered label.
+
+    UX Best Practice: Separators create clear visual section boundaries
+    without consuming significant vertical space.
+    """
+
+    def __init__(self, label: str = "",
+                 style: Optional[Style] = None,
+                 char: str = "─",
+                 component_id: Optional[str] = None) -> None:
+        super().__init__(component_id=component_id)
+        self.label = label
+        self.sep_style = style or STYLES.dim
+        self.char = char
+
+    def render(self, width: int, height: int) -> list[str]:
+        if self.label:
+            label_text = f" {self.label} "
+            label_vis = len(label_text)
+            left_w = max(2, (width - label_vis) // 2)
+            right_w = max(0, width - label_vis - left_w)
+            line = (
+                self.sep_style.apply(self.char * left_w)
+                + STYLES.muted.apply(label_text)
+                + self.sep_style.apply(self.char * right_w)
+            )
+        else:
+            line = self.sep_style.apply(self.char * width)
+
+        lines = [line]
+        while len(lines) < height:
+            lines.append(" " * width)
+        return lines[:height]
+
+
+# ==============================================================================
+# NOTIFICATION BANNER — Full-Width Alert
+# ==============================================================================
+
+class NotificationBanner(Component):
+    """
+    Full-width alert banner with icon and severity styling.
+
+    UX Best Practice: Banners command attention for critical information
+    that must not be missed (e.g., destructive operation warnings).
+    """
+
+    def __init__(self, message: str = "", severity: str = "info",
+                 dismissable: bool = True,
+                 component_id: Optional[str] = None) -> None:
+        super().__init__(component_id=component_id)
+        self.message = message
+        self.severity = severity
+        self.dismissable = dismissable
+
+    def render(self, width: int, height: int) -> list[str]:
+        icon_map = {
+            "info":    (Icons.INFO, STYLES.info),
+            "success": (Icons.CHECK, STYLES.success),
+            "warning": (Icons.WARNING, STYLES.warning),
+            "error":   (Icons.CROSS, STYLES.error),
+        }
+        icon, style = icon_map.get(self.severity, (Icons.INFO, STYLES.info))
+        dismiss = STYLES.dim.apply(" [Esc]") if self.dismissable else ""
+        content = f" {style.apply(icon)} {self.message}{dismiss}"
+        bg_style = Style(bg=PALETTE.surface_alt)
+        line = bg_style.apply(pad(content, width))
+
+        lines = [line]
+        while len(lines) < height:
+            lines.append(" " * width)
+        return lines[:height]

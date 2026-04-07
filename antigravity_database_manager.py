@@ -9,7 +9,7 @@
   Author:       Donald R. Johnson
   Organization: Agmercium (https://agmercium.com)
   License:      The Unlicense (Public Domain)
-  Version:      8.5.1
+  Version:      8.6.1 (canonical: src.core.constants.VERSION)
   Python:       3.10+
   Dependencies: None (standard library only)
 

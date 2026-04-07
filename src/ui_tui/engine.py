@@ -69,6 +69,7 @@ class Key(enum.Enum):
     F5 = "f5"
     CHAR = "char"        # Regular character — check `.char` attribute
     CTRL_C = "ctrl_c"    # Ctrl+C
+    CTRL_P = "ctrl_p"    # Ctrl+P (command palette)
     CTRL_S = "ctrl_s"    # Ctrl+S
     CTRL_Z = "ctrl_z"    # Ctrl+Z
     CTRL_R = "ctrl_r"    # Ctrl+R
@@ -125,6 +126,7 @@ class TerminalEngine:
     # Target FPS settings
     FPS_ACTIVE = 30     # During animations
     FPS_IDLE = 5        # When idle (just checking for resize etc.)
+    FPS_MAX = 60        # Hard cap — never exceed this
 
     def __init__(self) -> None:
         self._in_fullscreen = False
@@ -412,6 +414,7 @@ class TerminalEngine:
         for smoothness, slow when idle to save CPU.
         """
         fps = self.FPS_ACTIVE if animating else self.FPS_IDLE
+        fps = min(fps, self.FPS_MAX)  # Hard 60 FPS cap
         target_interval = 1.0 / fps
         elapsed = time.monotonic() - self._last_frame_time
         return max(0.0, target_interval - elapsed)
@@ -441,6 +444,8 @@ class TerminalEngine:
             return KeyEvent(Key.CTRL_Z)
         if ch == "\x12":  # Ctrl+R
             return KeyEvent(Key.CTRL_R)
+        if ch == "\x10":  # Ctrl+P
+            return KeyEvent(Key.CTRL_P)
 
         # Extended key prefix (arrow keys, function keys, etc.)
         if ch in ("\x00", "\xe0"):
@@ -499,6 +504,8 @@ class TerminalEngine:
             return KeyEvent(Key.CTRL_Z)
         if ch == "\x12":  # Ctrl+R
             return KeyEvent(Key.CTRL_R)
+        if ch == "\x10":  # Ctrl+P
+            return KeyEvent(Key.CTRL_P)
 
         if ch == "\x1b":
             # Could be ESC or start of escape sequence
@@ -553,3 +560,43 @@ class TerminalEngine:
             return KeyEvent(Key.ESCAPE)
 
         return KeyEvent(Key.CHAR, ch)
+
+
+# ==============================================================================
+# CLIPBOARD UTILITY
+# ==============================================================================
+
+def clipboard_write(text: str) -> bool:
+    """
+    Write text to the system clipboard.
+
+    Platform-specific: uses clip.exe (Windows), pbcopy (macOS),
+    or xclip/xsel (Linux). Returns True on success, False on failure.
+
+    UX Best Practice: Copy-to-clipboard is essential for UUID sharing
+    and reduces manual transcription errors.
+    """
+    import subprocess
+    try:
+        if sys.platform == "win32":
+            p = subprocess.Popen(["clip.exe"], stdin=subprocess.PIPE)
+            p.communicate(text.encode("utf-16le"))
+            return p.returncode == 0
+        elif sys.platform == "darwin":
+            p = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
+            p.communicate(text.encode("utf-8"))
+            return p.returncode == 0
+        else:
+            # Try xclip first, then xsel
+            for cmd in (["xclip", "-selection", "clipboard"],
+                        ["xsel", "--clipboard", "--input"]):
+                try:
+                    p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+                    p.communicate(text.encode("utf-8"))
+                    if p.returncode == 0:
+                        return True
+                except FileNotFoundError:
+                    continue
+            return False
+    except Exception:
+        return False

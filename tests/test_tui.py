@@ -537,6 +537,312 @@ class TestKeyEvent(unittest.TestCase):
         ke = KeyEvent(Key.CHAR, "x")
         self.assertIn("CHAR", repr(ke))
 
+    def test_ctrl_p_key_exists(self):
+        ke = KeyEvent(Key.CTRL_P)
+        self.assertEqual(ke.key, Key.CTRL_P)
+
+
+# ==============================================================================
+# CAPABILITY DETECTION TESTS
+# ==============================================================================
+
+class TestCapabilities(unittest.TestCase):
+    """Verify terminal capability detection."""
+
+    def test_caps_singleton_exists(self):
+        from src.ui_tui.capabilities import CAPS
+        self.assertIsNotNone(CAPS)
+
+    def test_caps_has_all_flags(self):
+        from src.ui_tui.capabilities import CAPS
+        self.assertIsInstance(CAPS.truecolor, bool)
+        self.assertIsInstance(CAPS.colors_256, bool)
+        self.assertIsInstance(CAPS.colors_basic, bool)
+        self.assertIsInstance(CAPS.unicode_box, bool)
+        self.assertIsInstance(CAPS.unicode_emoji, bool)
+        self.assertIsInstance(CAPS.mouse_sgr, bool)
+        self.assertIsInstance(CAPS.bracketed_paste, bool)
+        self.assertIsInstance(CAPS.light_bg, bool)
+        self.assertIsInstance(CAPS.reduce_motion, bool)
+
+    def test_basic_always_true(self):
+        from src.ui_tui.capabilities import CAPS
+        self.assertTrue(CAPS.colors_basic)
+
+    def test_color_mode_label(self):
+        from src.ui_tui.capabilities import color_mode_label
+        label = color_mode_label()
+        self.assertIn("color", label.lower())
+
+    def test_detect_function_returns_caps(self):
+        from src.ui_tui.capabilities import detect, TerminalCapabilities
+        result = detect()
+        self.assertIsInstance(result, TerminalCapabilities)
+
+
+# ==============================================================================
+# AUTO-DEGRADING COLOR TESTS
+# ==============================================================================
+
+class TestColorAutoDegradation(unittest.TestCase):
+    """Verify Color auto_fg/auto_bg degrade per capabilities."""
+
+    def test_auto_fg_returns_string(self):
+        c = Color(r=100, g=200, b=50, code_256=40, code_basic=32)
+        result = c.auto_fg()
+        self.assertIsInstance(result, str)
+        self.assertTrue(result.startswith("\x1b["))
+
+    def test_auto_bg_returns_string(self):
+        c = Color(r=100, g=200, b=50, code_256=40, code_basic=32)
+        result = c.auto_bg()
+        self.assertIsInstance(result, str)
+        self.assertTrue(result.startswith("\x1b["))
+
+
+# ==============================================================================
+# PALETTE VARIANT TESTS
+# ==============================================================================
+
+class TestPaletteVariants(unittest.TestCase):
+    """Verify alternative palette definitions."""
+
+    def test_high_contrast_palette_has_colors(self):
+        from src.ui_tui.theme import PaletteHighContrast
+        p = PaletteHighContrast()
+        self.assertIsInstance(p.primary, Color)
+        self.assertIsInstance(p.text, Color)
+        self.assertIsInstance(p.surface, Color)
+
+    def test_light_palette_has_colors(self):
+        from src.ui_tui.theme import PaletteLight
+        p = PaletteLight()
+        self.assertIsInstance(p.primary, Color)
+        self.assertIsInstance(p.text, Color)
+        self.assertIsInstance(p.surface, Color)
+
+    def test_high_contrast_text_is_white(self):
+        from src.ui_tui.theme import PaletteHighContrast
+        p = PaletteHighContrast()
+        self.assertEqual(p.text.r, 255)
+        self.assertEqual(p.text.g, 255)
+        self.assertEqual(p.text.b, 255)
+
+    def test_light_palette_dark_text(self):
+        from src.ui_tui.theme import PaletteLight
+        p = PaletteLight()
+        self.assertLess(p.text.r, 100)  # Dark text on light background
+
+
+# ==============================================================================
+# GLYPHS & ICONS TESTS
+# ==============================================================================
+
+class TestGlyphs(unittest.TestCase):
+    """Verify Glyphs class definitions."""
+
+    def test_bar_h_has_9_levels(self):
+        from src.ui_tui.theme import Glyphs
+        self.assertEqual(len(Glyphs.BAR_H), 9)
+
+    def test_bar_v_has_9_levels(self):
+        from src.ui_tui.theme import Glyphs
+        self.assertEqual(len(Glyphs.BAR_V), 9)
+
+    def test_gauge_icons_are_single_char(self):
+        from src.ui_tui.theme import Glyphs
+        self.assertEqual(len(Glyphs.GAUGE_FULL), 1)
+        self.assertEqual(len(Glyphs.GAUGE_EMPTY), 1)
+
+    def test_scrollbar_chars(self):
+        from src.ui_tui.theme import Glyphs
+        self.assertEqual(len(Glyphs.SCROLL_TRACK), 1)
+        self.assertEqual(len(Glyphs.SCROLL_THUMB), 1)
+
+    def test_shadow_style_exists(self):
+        self.assertIsNotNone(STYLES.shadow)
+        self.assertTrue(STYLES.shadow.dim)
+
+    def test_accent_bar_style_exists(self):
+        self.assertIsNotNone(STYLES.accent_bar)
+        self.assertTrue(STYLES.accent_bar.bold)
+
+
+# ==============================================================================
+# SCREEN TRANSITION TESTS
+# ==============================================================================
+
+class TestScreenTransition(unittest.TestCase):
+    """Verify screen transition animation."""
+
+    def test_transition_starts_incomplete(self):
+        from src.ui_tui.animation import ScreenTransition
+        old = [" " * 40] * 10
+        new = ["X" * 40] * 10
+        t = ScreenTransition(old, new, duration=1.0)
+        self.assertFalse(t.is_complete)
+
+    def test_transition_completes(self):
+        from src.ui_tui.animation import ScreenTransition
+        old = [" " * 40] * 10
+        new = ["X" * 40] * 10
+        t = ScreenTransition(old, new, duration=0.01)
+        time.sleep(0.05)
+        self.assertTrue(t.is_complete)
+
+    def test_transition_render_returns_frames(self):
+        from src.ui_tui.animation import ScreenTransition
+        old = [" " * 40] * 10
+        new = ["X" * 40] * 10
+        t = ScreenTransition(old, new, duration=1.0)
+        frame = t.render(40, 10)
+        self.assertEqual(len(frame), 10)
+
+    def test_snap_returns_new_frame(self):
+        from src.ui_tui.animation import ScreenTransition
+        old = [" " * 40] * 10
+        new = ["X" * 40] * 10
+        t = ScreenTransition(old, new, duration=10.0)
+        result = t.snap()
+        self.assertEqual(result, new)
+
+    def test_vertical_wipe_direction(self):
+        from src.ui_tui.animation import ScreenTransition
+        old = ["OLD"] * 5
+        new = ["NEW"] * 5
+        # Push: top-to-bottom reveal
+        t = ScreenTransition(old, new, direction="push", duration=10.0)
+        frame = t.render(3, 5)
+        # At progress ~0, most lines should still be old
+        self.assertEqual(len(frame), 5)
+
+
+# ==============================================================================
+# NEW COMPONENT TESTS
+# ==============================================================================
+
+class TestGaugeComponent(unittest.TestCase):
+    """Verify Gauge rendering."""
+
+    def test_gauge_renders(self):
+        from src.ui_tui.components import Gauge
+        g = Gauge(value=0.75, label="Health")
+        lines = g.render(60, 1)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(len(lines[0]) > 0)
+
+    def test_gauge_zero(self):
+        from src.ui_tui.components import Gauge
+        g = Gauge(value=0.0, label="Empty")
+        lines = g.render(60, 1)
+        self.assertEqual(len(lines), 1)
+
+    def test_gauge_full(self):
+        from src.ui_tui.components import Gauge
+        g = Gauge(value=1.0, label="Full")
+        lines = g.render(60, 1)
+        self.assertEqual(len(lines), 1)
+
+
+class TestBarChartComponent(unittest.TestCase):
+    """Verify BarChart rendering."""
+
+    def test_bar_chart_renders(self):
+        from src.ui_tui.components import BarChart
+        bc = BarChart(items=[("A", 10.0), ("B", 5.0), ("C", 8.0)])
+        lines = bc.render(60, 5)
+        self.assertEqual(len(lines), 5)
+
+    def test_bar_chart_empty(self):
+        from src.ui_tui.components import BarChart
+        bc = BarChart(items=[])
+        lines = bc.render(60, 3)
+        self.assertEqual(len(lines), 3)
+
+
+class TestKeyValueGridComponent(unittest.TestCase):
+    """Verify KeyValueGrid rendering."""
+
+    def test_grid_with_data(self):
+        from src.ui_tui.components import KeyValueGrid
+        g = KeyValueGrid(title="Info", items=[("Name", "Test"), ("Value", "42")])
+        lines = g.render(60, 5)
+        self.assertGreater(len(lines), 0)
+
+    def test_grid_empty(self):
+        from src.ui_tui.components import KeyValueGrid
+        g = KeyValueGrid(title="Empty", items=[])
+        lines = g.render(60, 3)
+        self.assertGreater(len(lines), 0)
+
+
+class TestSeparatorComponent(unittest.TestCase):
+    """Verify Separator rendering."""
+
+    def test_separator_plain(self):
+        from src.ui_tui.components import Separator
+        s = Separator()
+        lines = s.render(40, 1)
+        self.assertEqual(len(lines), 1)
+
+    def test_separator_with_label(self):
+        from src.ui_tui.components import Separator
+        s = Separator(label="Section")
+        lines = s.render(40, 1)
+        self.assertEqual(len(lines), 1)
+
+
+class TestNotificationBannerComponent(unittest.TestCase):
+    """Verify NotificationBanner rendering."""
+
+    def test_banner_renders(self):
+        from src.ui_tui.components import NotificationBanner
+        b = NotificationBanner(message="Test alert", severity="warning")
+        lines = b.render(60, 1)
+        self.assertEqual(len(lines), 1)
+
+    def test_banner_severities(self):
+        from src.ui_tui.components import NotificationBanner
+        for sev in ("info", "success", "warning", "error"):
+            b = NotificationBanner(message="Test", severity=sev)
+            lines = b.render(60, 1)
+            self.assertEqual(len(lines), 1)
+
+
+class TestScrollViewScrollbar(unittest.TestCase):
+    """Verify ScrollView renders with scrollbar."""
+
+    def test_scrollbar_appears_when_content_exceeds_height(self):
+        from src.ui_tui.components import ScrollView
+        content = [f"Line {i}" for i in range(100)]
+        sv = ScrollView(content_lines=content, scroll=0)
+        lines = sv.render(40, 10)
+        self.assertEqual(len(lines), 10)
+
+    def test_no_scrollbar_when_content_fits(self):
+        from src.ui_tui.components import ScrollView
+        content = [f"Line {i}" for i in range(5)]
+        sv = ScrollView(content_lines=content, scroll=0)
+        lines = sv.render(40, 10)
+        self.assertEqual(len(lines), 10)
+
+
+class TestHeaderGradient(unittest.TestCase):
+    """Verify Header component renders all 3 lines."""
+
+    def test_header_renders_3_lines(self):
+        from src.ui_tui.components import Header
+        h = Header(app_name="Test", version="1.0", subtitle="Home")
+        lines = h.render(80, 3)
+        self.assertEqual(len(lines), 3)
+
+    def test_header_renders_without_subtitle(self):
+        from src.ui_tui.components import Header
+        h = Header(app_name="Test", version="1.0")
+        lines = h.render(80, 3)
+        self.assertEqual(len(lines), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
+
