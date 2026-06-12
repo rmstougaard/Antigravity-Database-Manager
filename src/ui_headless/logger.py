@@ -53,5 +53,5 @@ class Logger:
         print("=" * 80)
         print("    AGMERCIUM RECOVERY SUITE")
         print(f"    {TOOL_NAME} v{VERSION}")
-        print("    by Donald R. Johnson | https://agmercium.com")
+        print("    by Donald R. Johnson | Patches by Rasmus Stougaard")
         print("=" * 80)
