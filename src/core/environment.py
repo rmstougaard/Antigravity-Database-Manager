@@ -53,7 +53,7 @@ class EnvironmentResolver:
                 return "Antigravity.exe" in res.stdout
             else:
                 res = subprocess.run(
-                    ["pgrep", "-f", "antigravity"],
+                    ["pgrep", "-x", "antigravity"],
                     capture_output=True, text=True, timeout=10,
                 )
                 return bool(res.stdout.strip())

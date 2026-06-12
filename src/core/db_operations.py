@@ -57,9 +57,9 @@ def build_workspace_dict(path: str) -> dict[str, str]:
     
     folder_name = os.path.basename(path_normalized) or "RecoveredProject"
 
-    uri_path_encoded = urllib.parse.quote(path_normalized, safe="/")
+    uri_path_encoded = urllib.parse.quote(path_normalized.lstrip("/"), safe="/")
     uri_encoded = f"file:///{uri_path_encoded}"
-    uri_plain = f"file:///{path_normalized}"
+    uri_plain = f"file:///{path_normalized.lstrip('/')}"
 
     return {
         "uri_encoded": uri_encoded,
@@ -534,9 +534,6 @@ def run_recovery_pipeline(
     # Auto-assign workspaces from brain artifacts
     for cid in all_pbs:
         if cid not in ws_assignments:
-            inner = existing_inner_blobs.get(cid)
-            if inner and ProtobufEncoder.extract_workspace_hint(inner):
-                continue  # Already has workspace in PB blob
             inferred = ArtifactParser.infer_workspace_from_brain(cid, brain_dir)
             if inferred and os.path.isdir(inferred):
                 ws_assignments[cid] = build_workspace_dict(inferred)

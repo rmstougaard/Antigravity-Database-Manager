@@ -19,7 +19,7 @@ AGMERCIUM_URL = "https://www.agmercium.com"
 # ==============================================================================
 DB_FILENAME = "state.vscdb"
 STORAGE_FILENAME = "storage.json"
-MIN_PYTHON_VERSION = (3, 10)
+MIN_PYTHON_VERSION = (3, 8)
 
 # ==============================================================================
 # TUNING PARAMETERS
